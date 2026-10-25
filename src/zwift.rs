@@ -90,10 +90,7 @@ pub fn classify_sync_reply(data: &[u8]) -> HandshakeReply {
 #[derive(Debug, PartialEq, Eq)]
 pub enum Buttons {
     /// Ride / Click v2: names of the buttons currently held down.
-    Ride {
-        bitmap: u32,
-        pressed: Vec<&'static str>,
-    },
+    Ride { bitmap: u32, pressed: Vec<String> },
     /// Click v1: state of the + and - buttons.
     ClickV1 { plus: bool, minus: bool },
 }
@@ -119,11 +116,18 @@ pub fn decode_buttons(data: &[u8]) -> Option<Buttons> {
     }
 }
 
-pub fn pressed_ride_buttons(bitmap: u32) -> Vec<&'static str> {
-    RIDE_BUTTONS
-        .iter()
-        .filter(|(mask, _)| bitmap & mask == 0)
-        .map(|(_, name)| *name)
+/// Names every cleared (pressed) bit. Bits missing from [`RIDE_BUTTONS`] are
+/// named by value, such as `BIT_0x80`, so unmapped buttons still show up.
+pub fn pressed_ride_buttons(bitmap: u32) -> Vec<String> {
+    (0..32)
+        .map(|i| 1u32 << i)
+        .filter(|bit| bitmap & bit == 0)
+        .map(
+            |bit| match RIDE_BUTTONS.iter().find(|(mask, _)| *mask == bit) {
+                Some((_, name)) => name.to_string(),
+                None => format!("BIT_0x{bit:x}"),
+            },
+        )
         .collect()
 }
 
@@ -208,6 +212,16 @@ mod tests {
             panic!("not a ride frame");
         };
         assert_eq!(pressed, vec!["B", "SHIFT_UP_R"]);
+    }
+
+    #[test]
+    fn unmapped_bits_are_named_by_value() {
+        // Seen from a real Click v2: ff fe ff ff 0f clears bit 0x80.
+        let frame = [MSG_RIDE_KEYPAD, 0x08, 0xff, 0xfe, 0xff, 0xff, 0x0f];
+        let Some(Buttons::Ride { pressed, .. }) = decode_buttons(&frame) else {
+            panic!("not a ride frame");
+        };
+        assert_eq!(pressed, vec!["BIT_0x80"]);
     }
 
     #[test]

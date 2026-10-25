@@ -199,6 +199,7 @@ async fn run_pod(
     }
 
     let mut held = BTreeSet::new();
+    let mut last_async: Option<Vec<u8>> = None;
     while let Some(n) = notifications.next().await {
         let t = start.elapsed().as_secs_f32();
         let source = if n.uuid == sync_tx.uuid {
@@ -208,7 +209,14 @@ async fn run_pod(
         } else {
             "other"
         };
-        println!("{t:8.2} [{label}] {source:5} {}", hex(&n.value));
+        // Pods resend their button state about 10 times a second; only log changes.
+        let repeat = n.uuid == async_char.uuid && last_async.as_ref() == Some(&n.value);
+        if !repeat {
+            println!("{t:8.2} [{label}] {source:5} {}", hex(&n.value));
+        }
+        if n.uuid == async_char.uuid {
+            last_async = Some(n.value.clone());
+        }
 
         if n.uuid == sync_tx.uuid {
             match zwift::classify_sync_reply(&n.value) {
@@ -219,12 +227,12 @@ async fn run_pod(
                 HandshakeReply::Other => {}
             }
         } else if let Some(buttons) = zwift::decode_buttons(&n.value) {
-            let now: BTreeSet<&str> = match buttons {
+            let now: BTreeSet<String> = match buttons {
                 Buttons::Ride { pressed, .. } => pressed.into_iter().collect(),
                 Buttons::ClickV1 { plus, minus } => [(plus, "PLUS"), (minus, "MINUS")]
                     .into_iter()
                     .filter(|(on, _)| *on)
-                    .map(|(_, b)| b)
+                    .map(|(_, b)| b.to_string())
                     .collect(),
             };
             for b in now.difference(&held) {

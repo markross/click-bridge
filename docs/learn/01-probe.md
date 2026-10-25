@@ -19,6 +19,7 @@ Contents:
 11. [The notification loop](#11-the-notification-loop)
 12. [Exercises](#12-exercises)
 13. [The first real run: a bug](#13-the-first-real-run-a-bug)
+14. [Reading the real log](#14-reading-the-real-log)
 
 ---
 
@@ -179,7 +180,7 @@ Rust enums become more powerful when variants carry data:
 
 ```rust
 pub enum Buttons {
-    Ride { bitmap: u32, pressed: Vec<&'static str> },
+    Ride { bitmap: u32, pressed: Vec<String> },
     ClickV1 { plus: bool, minus: bool },
 }
 ```
@@ -191,11 +192,14 @@ you reach it without checking which variant you have.
 
 - `Vec<T>` is a growable array that **owns** its contents (it's on the heap,
   and freed automatically when the `Vec` goes away).
-- `&'static str` is a string reference that lives for the whole program. Our
-  button names point into the `RIDE_BUTTONS` table, which is baked into the
-  binary, so they are `'static`. `'static` is a **lifetime**. You'll rarely
-  need to write lifetimes yourself, but they're how Rust proves references
-  never outlive the data they point to.
+- `String` is owned, growable text, while `&str` is a borrowed view of text
+  someone else owns. The names in the `RIDE_BUTTONS` table are `&'static str`:
+  references to text baked into the program binary that lives for the whole
+  run (`'static` is a **lifetime**, which is how Rust proves references never
+  outlive their data; you'll rarely write one yourself). `pressed` holds
+  `String`s instead because unmapped bits get a name built at runtime, such
+  as `format!("BIT_0x{bit:x}")`, and text built at runtime has to be owned by
+  someone. Section 14 covers why this changed.
 
 You get data out of an enum with `match`:
 
@@ -593,12 +597,12 @@ let mut held = BTreeSet::new();
 while let Some(n) = notifications.next().await {
     ...
     } else if let Some(buttons) = zwift::decode_buttons(&n.value) {
-        let now: BTreeSet<&str> = match buttons {
+        let now: BTreeSet<String> = match buttons {
             Buttons::Ride { pressed, .. } => pressed.into_iter().collect(),
             Buttons::ClickV1 { plus, minus } => [(plus, "PLUS"), (minus, "MINUS")]
                 .into_iter()
                 .filter(|(on, _)| *on)
-                .map(|(_, b)| b)
+                .map(|(_, b)| b.to_string())
                 .collect(),
         };
         for b in now.difference(&held) {
@@ -621,7 +625,7 @@ while let Some(n) = notifications.next().await {
   the new set (`now`) with the previous one (`held`). `now.difference(&held)`
   is "buttons held now but not before", which means just pressed. Phase 2
   sends a shift key on exactly that edge.
-- `.collect()` gathers an iterator into a collection. The `BTreeSet<&str>`
+- `.collect()` gathers an iterator into a collection. The `BTreeSet<String>`
   type annotation on `now` tells it which collection to build.
 - `held = now;` **moves** `now` into `held`. No copy is made, and `now` can't
   be used after this line, which is fine because the loop body ends there.
@@ -702,3 +706,43 @@ without saying which step failed. Each setup step now adds `.context(...)`,
 so a future failure reads like `sending RideOn: The attribute could not be
 found`. Adding context to every `?` that can fail for an outside reason is a
 good habit.
+
+## 14. Reading the real log
+
+The second run worked, and its log showed two things worth changing.
+
+**Unknown buttons were invisible.** One press produced `23 08 ff fe ff ff 0f`
+but no `PRESS` line. Decoding the varint by hand (section 6): the second
+byte `fe` carries bits 7 to 13, and its lowest bit is 0, so bit 7 (`0x80`)
+is cleared. Our `RIDE_BUTTONS` table, copied from the Zwift Ride, has no
+entry for `0x80`, so the old filter-the-table code silently skipped it.
+
+`pressed_ride_buttons` now walks all 32 bits instead:
+
+```rust
+(0..32)
+    .map(|i| 1u32 << i)
+    .filter(|bit| bitmap & bit == 0)
+    .map(|bit| match RIDE_BUTTONS.iter().find(|(mask, _)| *mask == bit) {
+        Some((_, name)) => name.to_string(),
+        None => format!("BIT_0x{bit:x}"),
+    })
+    .collect()
+```
+
+- `1u32 << i` is a number with only bit `i` set.
+- `match` on the `Option` that `find` returns: a known bit uses its table
+  name, an unknown one gets a generated name. Both arms must produce the same
+  type, so the known name is converted with `.to_string()` into an owned
+  `String`, matching what `format!` produces.
+- That's why `pressed` changed from `Vec<&'static str>` to `Vec<String>`: a
+  `&'static str` can only point at text that exists for the whole program,
+  and `BIT_0x80` is created while it runs.
+
+**The log was mostly repeats.** After any press, each pod resends its full
+button state about every 100 ms. The probe now remembers the last async
+frame in `last_async: Option<Vec<u8>>` and skips printing identical ones.
+`last_async.as_ref() == Some(&n.value)` compares without moving anything:
+`as_ref()` turns `&Option<Vec<u8>>` into `Option<&Vec<u8>>`, so both sides
+are borrowed. `n.value.clone()` then stores a copy, because `n` is still
+needed below.
