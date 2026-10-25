@@ -18,6 +18,7 @@ Contents:
 10. [Ownership across tasks: `clone` and `move`](#10-ownership-across-tasks-clone-and-move)
 11. [The notification loop](#11-the-notification-loop)
 12. [Exercises](#12-exercises)
+13. [The first real run: a bug](#13-the-first-real-run-a-bug)
 
 ---
 
@@ -656,3 +657,48 @@ Further reading: [The Rust Book](https://doc.rust-lang.org/book/), chapters
 3 to 6 and 9 cover nearly everything above, and
 [Rust by Example](https://doc.rust-lang.org/rust-by-example/) is good for
 quick lookups.
+
+## 13. The first real run: a bug
+
+The first run on a real Click v2 printed:
+
+```
+[pod1]     characteristic 00000003-19ca-...  CharPropFlags(WRITE_WITHOUT_RESPONSE)
+[pod1]     characteristic 00000100-19ca-...  CharPropFlags(WRITE_WITHOUT_RESPONSE | WRITE | NOTIFY)
+[pod1] using async=00000002-... rx=00000100-... tx=00000004-...
+[pod1] error: Runtime Error: The attribute could not be found.
+```
+
+The handshake characteristic is `00000003`, but the probe chose `00000100`.
+The original code was:
+
+```rust
+let sync_rx = find_char(&chars, zwift::CHAR_SYNC_RX, CharPropFlags::WRITE)
+    .or_else(|| find_char(&chars, zwift::CHAR_SYNC_RX, CharPropFlags::WRITE_WITHOUT_RESPONSE))
+```
+
+`find_char` already falls back to "any Zwift characteristic with this
+property" when the exact UUID doesn't match. So the first call, asking for
+`WRITE`, didn't find `00000003` (it only has `WRITE_WITHOUT_RESPONSE`) and
+fell back to `00000100`, which does have `WRITE`. It returned `Some`, so the
+`or_else` never ran. Each piece was correct on its own; the bug was in how
+they combined.
+
+The fix asks for *either* property in one call:
+
+```rust
+find_char(&chars, zwift::CHAR_SYNC_RX, CharPropFlags::WRITE | CharPropFlags::WRITE_WITHOUT_RESPONSE)
+```
+
+- `CharPropFlags` is a **bitflags** type: each property is one bit, and `|`
+  combines them into a set.
+- `a.contains(b)` is true if `a` has *all* of `b`'s bits.
+  `a.intersects(b)` is true if `a` has *any* of them. `find_char` now uses
+  `intersects`, so the exact UUID matches whenever it has an acceptable
+  property, and the fallback only runs if it's genuinely missing.
+
+The error message itself was vague because `?` passed the Bluetooth error up
+without saying which step failed. Each setup step now adds `.context(...)`,
+so a future failure reads like `sending RideOn: The attribute could not be
+found`. Adding context to every `?` that can fail for an outside reason is a
+good habit.

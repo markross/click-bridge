@@ -143,15 +143,12 @@ async fn run_pod(
     let chars = peripheral.characteristics();
     let async_char = find_char(&chars, zwift::CHAR_ASYNC, CharPropFlags::NOTIFY)
         .context("no async (notify) characteristic")?;
-    let sync_rx = find_char(&chars, zwift::CHAR_SYNC_RX, CharPropFlags::WRITE)
-        .or_else(|| {
-            find_char(
-                &chars,
-                zwift::CHAR_SYNC_RX,
-                CharPropFlags::WRITE_WITHOUT_RESPONSE,
-            )
-        })
-        .context("no sync RX (write) characteristic")?;
+    let sync_rx = find_char(
+        &chars,
+        zwift::CHAR_SYNC_RX,
+        CharPropFlags::WRITE | CharPropFlags::WRITE_WITHOUT_RESPONSE,
+    )
+    .context("no sync RX (write) characteristic")?;
     let sync_tx = find_char(&chars, zwift::CHAR_SYNC_TX, CharPropFlags::INDICATE)
         .context("no sync TX (indicate) characteristic")?;
     println!(
@@ -160,8 +157,14 @@ async fn run_pod(
     );
 
     let mut notifications = peripheral.notifications().await?;
-    peripheral.subscribe(&async_char).await?;
-    peripheral.subscribe(&sync_tx).await?;
+    peripheral
+        .subscribe(&async_char)
+        .await
+        .context("subscribing to async characteristic")?;
+    peripheral
+        .subscribe(&sync_tx)
+        .await
+        .context("subscribing to sync TX characteristic")?;
 
     let write_type = if sync_rx.properties.contains(CharPropFlags::WRITE) {
         WriteType::WithResponse
@@ -170,7 +173,8 @@ async fn run_pod(
     };
     peripheral
         .write(&sync_rx, zwift::RIDE_ON, write_type)
-        .await?;
+        .await
+        .context("sending RideOn")?;
     println!("[{label}] sent RideOn");
     if unlock_ack {
         peripheral
@@ -237,19 +241,23 @@ async fn run_pod(
 }
 
 /// Picks the characteristic with the expected UUID, or else the first one
-/// in a Zwift service with the required property.
+/// in a Zwift service with the required property. `props` lists acceptable
+/// properties: a characteristic needs at least one of them.
+///
+/// The exact UUID always wins, so the fallback can't pick a different
+/// characteristic just because it has a property the real one lacks.
 fn find_char(
     chars: &BTreeSet<Characteristic>,
     uuid: uuid::Uuid,
-    prop: CharPropFlags,
+    props: CharPropFlags,
 ) -> Option<Characteristic> {
     chars
         .iter()
-        .find(|c| c.uuid == uuid && c.properties.contains(prop))
+        .find(|c| c.uuid == uuid && c.properties.intersects(props))
         .or_else(|| {
             chars.iter().find(|c| {
                 (c.service_uuid == zwift::SERVICE_LEGACY || c.service_uuid == zwift::SERVICE_FC82)
-                    && c.properties.contains(prop)
+                    && c.properties.intersects(props)
             })
         })
         .cloned()
