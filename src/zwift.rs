@@ -35,9 +35,9 @@ pub const MSG_CHALLENGE: u8 = 0xff;
 
 /// Button bits of the Click v2 bitmap. A bit cleared to 0 means pressed.
 ///
-/// Confirmed on real pods: A, B, Y, Z, LEFT, RIGHT, UP and MINUS (the left
-/// pod's shift-down button). DOWN is assumed from the Zwift Ride layout, and
-/// PLUS (the right pod's shift-up button) is still unmapped.
+/// Confirmed on real pods: A, B, Y, Z, LEFT, RIGHT, UP, MINUS (the left
+/// pod's shift-down button) and PLUS (the right pod's shift-up button). DOWN
+/// is assumed from the Zwift Ride layout.
 pub const CLICK_V2_BUTTONS: &[(u32, &str)] = &[
     (0x001, "LEFT"),
     (0x002, "UP"),
@@ -48,6 +48,7 @@ pub const CLICK_V2_BUTTONS: &[(u32, &str)] = &[
     (0x040, "Y"),
     (0x080, "Z"),
     (0x100, "MINUS"),
+    (0x1000, "PLUS"),
 ];
 
 /// Returns true if advertised data looks like a Zwift controller.
@@ -220,7 +221,7 @@ mod tests {
 
     #[test]
     fn real_click_v2_frames() {
-        // Captured from Mark's pods while pressing Z, then the left pod's -.
+        // Captured from Mark's pods while pressing Z, the left pod's -, B and +.
         assert_eq!(
             pressed(&[0x23, 0x08, 0xff, 0xfe, 0xff, 0xff, 0x0f]),
             vec!["Z"]
