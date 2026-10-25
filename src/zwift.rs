@@ -33,24 +33,21 @@ pub const MSG_CLICK_KEYPAD: u8 = 0x37;
 /// Replies on SYNC_TX starting with this byte are a crypto challenge (locked pod).
 pub const MSG_CHALLENGE: u8 = 0xff;
 
-/// Button bits of the Ride / Click v2 bitmap. A bit cleared to 0 means pressed.
-pub const RIDE_BUTTONS: &[(u32, &str)] = &[
-    (0x00001, "LEFT"),
-    (0x00002, "UP"),
-    (0x00004, "RIGHT"),
-    (0x00008, "DOWN"),
-    (0x00010, "A"),
-    (0x00020, "B"),
-    (0x00040, "Y"),
-    (0x00100, "Z"),
-    (0x00200, "SHIFT_UP_L"),
-    (0x00400, "SHIFT_DN_L"),
-    (0x00800, "POWERUP_L"),
-    (0x01000, "ONOFF_L"),
-    (0x02000, "SHIFT_UP_R"),
-    (0x04000, "SHIFT_DN_R"),
-    (0x10000, "POWERUP_R"),
-    (0x20000, "ONOFF_R"),
+/// Button bits of the Click v2 bitmap. A bit cleared to 0 means pressed.
+///
+/// Confirmed on real pods: A, B, Y, Z, LEFT, RIGHT, UP and MINUS (the left
+/// pod's shift-down button). DOWN is assumed from the Zwift Ride layout, and
+/// PLUS (the right pod's shift-up button) is still unmapped.
+pub const CLICK_V2_BUTTONS: &[(u32, &str)] = &[
+    (0x001, "LEFT"),
+    (0x002, "UP"),
+    (0x004, "RIGHT"),
+    (0x008, "DOWN"),
+    (0x010, "A"),
+    (0x020, "B"),
+    (0x040, "Y"),
+    (0x080, "Z"),
+    (0x100, "MINUS"),
 ];
 
 /// Returns true if advertised data looks like a Zwift controller.
@@ -116,14 +113,14 @@ pub fn decode_buttons(data: &[u8]) -> Option<Buttons> {
     }
 }
 
-/// Names every cleared (pressed) bit. Bits missing from [`RIDE_BUTTONS`] are
+/// Names every cleared (pressed) bit. Bits missing from [`CLICK_V2_BUTTONS`] are
 /// named by value, such as `BIT_0x80`, so unmapped buttons still show up.
 pub fn pressed_ride_buttons(bitmap: u32) -> Vec<String> {
     (0..32)
         .map(|i| 1u32 << i)
         .filter(|bit| bitmap & bit == 0)
         .map(
-            |bit| match RIDE_BUTTONS.iter().find(|(mask, _)| *mask == bit) {
+            |bit| match CLICK_V2_BUTTONS.iter().find(|(mask, _)| *mask == bit) {
                 Some((_, name)) => name.to_string(),
                 None => format!("BIT_0x{bit:x}"),
             },
@@ -211,17 +208,40 @@ mod tests {
         let Some(Buttons::Ride { pressed, .. }) = decode_buttons(&ride_frame(bitmap)) else {
             panic!("not a ride frame");
         };
-        assert_eq!(pressed, vec!["B", "SHIFT_UP_R"]);
+        assert_eq!(pressed, vec!["B", "BIT_0x2000"]);
+    }
+
+    fn pressed(frame: &[u8]) -> Vec<String> {
+        match decode_buttons(frame) {
+            Some(Buttons::Ride { pressed, .. }) => pressed,
+            other => panic!("not a ride frame: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn real_click_v2_frames() {
+        // Captured from Mark's pods while pressing Z, then the left pod's -.
+        assert_eq!(
+            pressed(&[0x23, 0x08, 0xff, 0xfe, 0xff, 0xff, 0x0f]),
+            vec!["Z"]
+        );
+        assert_eq!(
+            pressed(&[0x23, 0x08, 0xff, 0xfd, 0xff, 0xff, 0x0f]),
+            vec!["MINUS"]
+        );
+        assert_eq!(
+            pressed(&[0x23, 0x08, 0xdf, 0xff, 0xff, 0xff, 0x0f]),
+            vec!["B"]
+        );
     }
 
     #[test]
     fn unmapped_bits_are_named_by_value() {
-        // Seen from a real Click v2: ff fe ff ff 0f clears bit 0x80.
-        let frame = [MSG_RIDE_KEYPAD, 0x08, 0xff, 0xfe, 0xff, 0xff, 0x0f];
-        let Some(Buttons::Ride { pressed, .. }) = decode_buttons(&frame) else {
-            panic!("not a ride frame");
-        };
-        assert_eq!(pressed, vec!["BIT_0x80"]);
+        // Bit 0x200 is not in the table.
+        assert_eq!(
+            pressed(&[0x23, 0x08, 0xff, 0xfb, 0xff, 0xff, 0x0f]),
+            vec!["BIT_0x200"]
+        );
     }
 
     #[test]

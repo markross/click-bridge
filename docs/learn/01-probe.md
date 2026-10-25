@@ -112,7 +112,7 @@ pub const UNLOCK_ACK: &[u8] = &[0xff, 0x04, 0x00];
   to be valid UTF-8). Bluetooth sends bytes, so we use bytes.
 
 ```rust
-pub const RIDE_BUTTONS: &[(u32, &str)] = &[
+pub const CLICK_V2_BUTTONS: &[(u32, &str)] = &[
     (0x00001, "LEFT"),
     ...
 ];
@@ -193,7 +193,7 @@ you reach it without checking which variant you have.
 - `Vec<T>` is a growable array that **owns** its contents (it's on the heap,
   and freed automatically when the `Vec` goes away).
 - `String` is owned, growable text, while `&str` is a borrowed view of text
-  someone else owns. The names in the `RIDE_BUTTONS` table are `&'static str`:
+  someone else owns. The names in the `CLICK_V2_BUTTONS` table are `&'static str`:
   references to text baked into the program binary that lives for the whole
   run (`'static` is a **lifetime**, which is how Rust proves references never
   outlive their data; you'll rarely write one yourself). `pressed` holds
@@ -373,7 +373,7 @@ mod tests {
         let Some(Buttons::Ride { pressed, .. }) = decode_buttons(&ride_frame(bitmap)) else {
             panic!("not a ride frame");
         };
-        assert_eq!(pressed, vec!["B", "SHIFT_UP_R"]);
+        assert_eq!(pressed, vec!["B", "BIT_0x2000"]);
     }
 }
 ```
@@ -385,7 +385,7 @@ mod tests {
   they test, in the same file.
 - `#[test]` marks a test function. `cargo test` finds and runs them all.
 - `!0x20` is bitwise NOT: all bits set except `0x20`. So this bitmap means
-  "B and SHIFT_UP_R are pressed, nothing else".
+  "B and the unmapped bit `0x2000` are pressed, nothing else".
 - `let PATTERN = value else { ... };` is **let-else**: if the value matches
   the pattern, its parts become variables (`pressed`); if not, the `else`
   block runs and must leave the function (here by `panic!`, which fails the
@@ -714,7 +714,7 @@ The second run worked, and its log showed two things worth changing.
 **Unknown buttons were invisible.** One press produced `23 08 ff fe ff ff 0f`
 but no `PRESS` line. Decoding the varint by hand (section 6): the second
 byte `fe` carries bits 7 to 13, and its lowest bit is 0, so bit 7 (`0x80`)
-is cleared. Our `RIDE_BUTTONS` table, copied from the Zwift Ride, has no
+is cleared. Our button table, then copied from the Zwift Ride, had no
 entry for `0x80`, so the old filter-the-table code silently skipped it.
 
 `pressed_ride_buttons` now walks all 32 bits instead:
@@ -723,7 +723,7 @@ entry for `0x80`, so the old filter-the-table code silently skipped it.
 (0..32)
     .map(|i| 1u32 << i)
     .filter(|bit| bitmap & bit == 0)
-    .map(|bit| match RIDE_BUTTONS.iter().find(|(mask, _)| *mask == bit) {
+    .map(|bit| match CLICK_V2_BUTTONS.iter().find(|(mask, _)| *mask == bit) {
         Some((_, name)) => name.to_string(),
         None => format!("BIT_0x{bit:x}"),
     })
@@ -746,3 +746,11 @@ frame in `last_async: Option<Vec<u8>>` and skips printing identical ones.
 `as_ref()` turns `&Option<Vec<u8>>` into `Option<&Vec<u8>>`, so both sides
 are borrowed. `n.value.clone()` then stores a copy, because `n` is still
 needed below.
+
+**Then the table itself turned out wrong.** Pressing **Z** gave bit `0x80`,
+and pressing the left pod's **−** gave bit `0x100`, which the Ride table
+called `Z`. So the Click v2 isn't laid out like the Ride. The table is now
+`CLICK_V2_BUTTONS`, holding only mappings seen on real pods (plus DOWN,
+assumed). Everything else prints as `BIT_0x...` until we confirm it. The test
+`real_click_v2_frames` uses the exact bytes from the log, so if anyone edits
+the table wrongly later, `cargo test` catches it.
