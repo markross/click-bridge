@@ -16,7 +16,8 @@ New to Rust? Start with [docs/learn/01-probe.md](docs/learn/01-probe.md).
    Then open a new Terminal window so `cargo` is on your PATH.
 2. Quit Zwift and Zwift Companion. A pod talks to one app at a time.
 3. Wake both pods by pressing a button on each.
-4. From this folder, run:
+4. In the built-in **Terminal** app (not an editor's terminal, see
+   Troubleshooting), from this folder, run:
    ```sh
    cargo run --bin probe
    ```
@@ -36,6 +37,18 @@ Options:
 | `--no-keepalive` | Don't resend `RideOn` every 3 seconds. Use it to check whether pods drop after about a minute. |
 
 To save the output for sharing: `cargo run --bin probe 2>&1 | tee probe.log`
+
+## Troubleshooting
+
+**`zsh: abort` straight after `Running target/debug/probe`.** macOS killed the
+probe because the app it was launched from doesn't declare Bluetooth use.
+This happens in editor terminals such as VS Code's. Run it from Terminal or
+iTerm2 instead.
+
+**"no Zwift controllers found".** Press a button on each pod just before
+running, check Zwift and Zwift Companion are fully quit, and check that
+Terminal is switched on under System Settings → Privacy & Security →
+Bluetooth.
 
 ## Tests
 
