@@ -51,10 +51,30 @@ together with a compiler driver. The commands you'll use most:
 A **crate** is Rust's unit of compilation, roughly "a package". This project
 holds two crates that share a name:
 
-- a **library crate** rooted at `src/lib.rs`, called `click_bridge` in code
-  (Cargo turns the dash in `click-bridge` into an underscore);
+- a **library crate** whose code starts in `src/lib.rs`;
 - a **binary crate** for each file in `src/bin/`. `probe.rs` becomes a
   program called `probe`.
+
+**Where the library's name comes from.** You won't find `click_bridge`
+written anywhere in `lib.rs`. The name comes from `Cargo.toml`:
+
+```toml
+[package]
+name = "click-bridge"
+```
+
+Cargo names the library after the package. Rust identifiers can't contain
+`-`, so in code it becomes `click_bridge`. `src/lib.rs` is the file Cargo
+looks for by convention to find where the library starts (its **crate
+root**). Like a folder, the crate's name sits outside it, not inside. You can
+see the name used at the top of `probe.rs`:
+
+```rust
+use click_bridge::zwift::{self, Buttons, HandshakeReply};
+```
+
+That path runs `Cargo.toml` name (`click_bridge`) → `lib.rs` (which declares
+`pub mod zwift;`) → `zwift.rs` → the `Buttons` and `HandshakeReply` items.
 
 Splitting it this way means the protocol logic in the library can be unit
 tested on any computer, while `probe.rs` does the Bluetooth work that needs
